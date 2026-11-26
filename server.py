@@ -21,13 +21,26 @@ def tts():
     text = str(data.get("text", "")).strip()[:MAX_CHARS]
     if not text:
         return jsonify(error="texto vazio"), 400
-    length_scale = str(data.get("length_scale", 1.0))  # <1 = mais rápido
+    def num(k, padrao):
+        try:
+            return str(float(data.get(k, padrao)))
+        except (TypeError, ValueError):
+            return str(padrao)
+
+    # ajustes de naturalidade (todos opcionais; o n8n pode sobrescrever)
+    extras = ["--length-scale", num("length_scale", 1.1),
+              "--noise-scale", num("noise_scale", 0.75),
+              "--noise-w-scale", num("noise_w_scale", 0.9),
+              "--sentence-silence", num("sentence_silence", 0.35)]
     with tempfile.TemporaryDirectory() as d:
         wav, ogg = os.path.join(d, "a.wav"), os.path.join(d, "a.ogg")
-        p = subprocess.run(
-            ["python3", "-m", "piper", "-m", VOICE, "--data-dir", VOICE_DIR,
-             "--length-scale", length_scale, "-f", wav],
-            input=text.encode("utf-8"), capture_output=True, timeout=40)
+        base = ["python3", "-m", "piper", "-m", VOICE, "--data-dir", VOICE_DIR, "-f", wav]
+        p = subprocess.run(base + extras, input=text.encode("utf-8"),
+                           capture_output=True, timeout=40)
+        if p.returncode != 0 or not os.path.exists(wav):
+            # se alguma flag não existir nessa versão, tenta só com o ritmo
+            p = subprocess.run(base + ["--length-scale", num("length_scale", 1.1)],
+                               input=text.encode("utf-8"), capture_output=True, timeout=40)
         if p.returncode != 0 or not os.path.exists(wav):
             return jsonify(error="piper", detail=p.stderr.decode()[-400:]), 500
         f = subprocess.run(
